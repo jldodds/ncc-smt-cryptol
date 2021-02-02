@@ -1,0 +1,49 @@
+sum_eq_5 : Integer -> Integer -> Bit
+sum_eq_5 x y = x + y == 5
+
+DecodePacketNumber : [64] -> [64] -> [64] -> [64]
+DecodePacketNumber largest_pn truncated_pn pn_nbits = result where
+    expected_pn  = largest_pn + 1
+    pn_win       = 1 << pn_nbits
+    pn_hwin      = pn_win / 2
+    pn_mask      = pn_win - 1
+    candidate_pn = (expected_pn && ~pn_mask) || truncated_pn
+    result = if candidate_pn <= expected_pn - pn_hwin
+             then candidate_pn + pn_win
+             else if candidate_pn > expected_pn + pn_hwin /\ candidate_pn > pn_win
+                  then candidate_pn - pn_win
+                  else candidate_pn
+
+DecodePacketNumberFixed : [64] -> [64] -> [64] -> [64]
+DecodePacketNumberFixed largest_pn truncated_pn pn_nbits = result where
+    expected_pn  = largest_pn + 1
+    pn_win       = 1 << pn_nbits
+    pn_hwin      = pn_win / 2
+    pn_mask      = pn_win - 1
+    candidate_pn = (expected_pn && ~pn_mask) || truncated_pn
+    result = if candidate_pn <= expected_pn - pn_hwin /\ candidate_pn < (1 << 62) - pn_win
+             then candidate_pn + pn_win
+             else if candidate_pn > expected_pn + pn_hwin /\ candidate_pn >= pn_win
+                  then candidate_pn - pn_win
+                  else candidate_pn
+
+DecodePacketNumber_test1 = DecodePacketNumber (0 # 0xa82f30ea) (0 # 0x9b32) 16
+DecodePacketNumber_test1_correct = DecodePacketNumber_test1 == (0 # 0xa82f9b32)
+
+truncated_pn_max tpn = tpn <= 2^^32-1
+
+largest_pn_max lpn = lpn <= 2^^62-1
+largest_pn_min lpn = lpn >= 64
+
+pn_nbits_vals nb = nb == 8 \/ nb == 16 \/ nb == 24 \/ nb == 32 
+truncated_bn_range tpn nb = tpn < 2^^nb /\ tpn >= 2^^(nb-8) 
+
+result_max result = result <= 2^^62-1
+
+decode_packet_number_correct fn largest_pn truncated_pn pn_nbits =
+    (truncated_pn_max truncated_pn /\
+     largest_pn_max largest_pn /\
+     largest_pn_min largest_pn /\
+     pn_nbits_vals pn_nbits /\
+     truncated_bn_range truncated_pn pn_nbits) ==>
+     result_max (fn largest_pn truncated_pn pn_nbits)
