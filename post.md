@@ -271,7 +271,7 @@ decode_packet_number_correct fn largest_pn truncated_pn pn_nbits =
      result_max (fn largest_pn truncated_pn pn_nbits)
 ```
 
-It's worth noting that Cryptol has first-order functions. You can see that we actually
+It's worth noting that Cryptol has first-class functions. You can see that we actually
 parameterize this property over functions with the same signature as ```DecodePacketNumber```. This will be useful when we fix the function in a minute!
 
 Let's try to prove that the function meets the specification:
