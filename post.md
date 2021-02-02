@@ -1,9 +1,24 @@
-This is an attempt to reproduce [this article](https://research.nccgroup.com/2021/01/29/software-verification-and-analysis-using-z3/) in Cryptol (partially to learn what they did). The full source for this example is [here](quic.cry)
+# Cryptol as an SMT Frontend
 
-The article notes
+We've run into [NCC's Cryptography Group] numerous times, because Galois' services and NCC's complement each other extremely well. For example, on our ongoing ['blst' Verification project](https://galois.com/blog/2020/09/announcing-the-blst-bls-verification-project/) with [Supranational](https://www.supranational.net/), [Ethereum Foundation](https://ethereum.org/en/) and [Protocol Labs](https://protocol.ai/), NCC provided a [public audit and report](https://research.nccgroup.com/2021/01/20/public-report-blst-cryptographic-implementation-review/), while we at Galois have verified much of the core library.
+
+When I saw a recent post by [Gérald Doussot](https://research.nccgroup.com/author/geralddoussot/) ([twitter](https://twitter.com/gerald_doussot?lang=en)) titled [Software Verification and Analysis using Z3](https://research.nccgroup.com/2021/01/29/software-verification-and-analysis-using-z3/) I was pretty excited. It turned out to be a great article! The team definitely understands where they can get mileage using 
+SMT solvers such as Z3.
+
+The natural question for me (and others at Galois, like [Aaron Tomb](https://galois.com/team/aaron-tomb/)), is how we would attack the same problem. In the NCC article, they use [SMT-LIB](http://smtlib.cs.uiowa.edu/) directly but add
+
 > Note that Z3 has several, perhaps more approachable APIs available, including in the Python language.
 
-Cryptol is one such interface. Let's see how it works for this application!
+Cryptol is one such interface. And for me, it's what I reach for when I need to do work like what's shared in the NCC post.
+
+Cryptol provides, among other things
+ - Approachable Syntax
+ - Strongly typed length-dependent Sequences
+ - First-class functions
+
+From here on, this post was written live as I programmed the first half of the NCC post in Cryptol. If you'd like to see the completed code, you can find it [here](quic.cry). If you'd like to, you can follow along. I've included all of the commands I use to run the program. You'll need to [get Cryptol](https://cryptol.net/downloads.html) first. 
+
+## Reproducing the Demo 
 
 It starts with a demo. Find values for ```x``` and ```y``` such that ```x + y = 5```
 
@@ -93,11 +108,15 @@ Main> :sat sum_eq_5 6
 
 If you compare the handwritten to the Cryptol, you'll notice that Cryptol uses a lot more definitions. This is becasue Cryptol agressively breaks down expressions and shares them where possible. For many applications this can make representations far more efficient!
 
-In general, I tend to reach for Cryptol when I need to use a solver, it can usually represent pretty much anything I'd want. Let's move forward in the article and see if that holds up!
+## Checking the QUIC DecodePacketNumber Function
 
-The article gives context for what's going on, I'm just going to reproduce the SMT work. I recommend giving it a read if you want to learn about how NCC analyzed a QUIC standard!
+In this section, we're going to implement the DecodePacketNumber function. Then
+we'll constrain the inputs and outputs as required by the specification, and
+see if the algoritm suggested by the specification meets those constraints.
 
-Here's the code snippet that was analyzed. I'll port this to Cryptol. I think it'll be easier to use this version than the SMTLib version, because I haven't used SMTLib very much. 
+I'm going to skip all of the context around what the function does, [the NCC article](https://research.nccgroup.com/2021/01/29/software-verification-and-analysis-using-z3/) does a great job of explaining that part. I'm just going to reproduce the SMT work. 
+
+Here's the code snippet that was analyzed. I'll port this to Cryptol. I think it'll be easier to use this version than the SMTLib version from the article, because I haven't used SMTLib very much. 
 
 ```
 DecodePacketNumber(largest_pn, truncated_pn, pn_nbits):
@@ -136,9 +155,10 @@ Let's set up the function type. The article used 64 bit bitvectors, which seems 
 DecodePacketNumber : [64] -> [64] -> [64] -> [64]
 ```
 
-3 64 bit sequences in, and one out. Perfect.
+3 64 bit sequences in, and 1 out. Perfect.
 
-Cryptol uses ``where`` which is a little upside-down. We'll do that and say what we're returning at the end.
+Cryptol uses ```where``` which is a little upside-down. Here we're saying that there's
+some value called result, that we define after the ```where``` keyword.
 
 ```
 DecodePacketNumber : [64] -> [64] -> [64] -> [64]
@@ -155,7 +175,7 @@ Loading module Main
 ```
 
 It typechecked! Let's fill in the rest of the functionality. Most of it is copy-paste.
-We mess with the names a little, since it's not as nice to update variables in cryptol
+We mess with the names a little, since it's not as nice to update variables in cryptol.
 
 When I was copy-pasting, I forgot that ```|``` wasn't in cryptol. The post says it's bitwise or. I think it's ```||```. Let's check:
 
@@ -188,12 +208,12 @@ DecodePacketNumber largest_pn truncated_pn pn_nbits = result where
                   else candidate_pn
 ```
 
-The article does some division, but uses a shift with an offset. I think Cryptol division should work fine here (it might be implemented that way, I don't know).
+The article does some division, but uses a shift with an offset. I think Cryptol division should work fine here (it might be implemented that way internally, I don't know).
 
 Our ```if``` statements look a little different than the ifs in the reference. That's because Cryptol is a functional lanugage, and there is no concept of a statement. If
 you're familiar with C, a Cryptol if expression is much more like a conditional operator.
 
-Whew, they've got some test cases. Let's try those out. We'll program the test
+Whew, they've got a test case (really underwhelming for a function with this much branching behavior). Let's try it out. We'll program the test
 vector in Cryptol:
 
 ```
@@ -214,7 +234,7 @@ Main> DecodePacketNumber_test1
 0x00000000a82f9b32
 ```
 
-uhh weird. That looks like the result we expected but multiplied by 16 + 2... or. A copy paste error. Whoops, our implementation is fine after all, as is the one in the article. Just the article's quote of the spec was off. We'll add that 2 on the back of
+uhh weird. That looks like the result we expected but multiplied by 16 + 2... or a copy paste error. Whoops, our implementation is fine after all, as is the one in the article. Just the article's quote of the spec was off. We'll add that 2 on the back of
 our test checker and everything's happy!
 
 In the article, z3 spits out all of the intermediate values. We don't do that in
@@ -283,6 +303,8 @@ Q.E.D.
 ```
 
 Which means the property holds! 
+ 
+## Wrapping up
 
 Overall, this went really smoothly. The specification ported over nicely to Cryptol, with the only change being adapting slightly to the functional style. We
 were able to keep our propreties separate from the implementation, which will let us
