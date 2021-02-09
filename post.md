@@ -1,38 +1,37 @@
 # Cryptol as an SMT Frontend
 
-We've run into [NCC's Cryptography Group] numerous times, because Galois' services and NCC's complement each other extremely well. For example, on our ongoing ['blst' Verification project](https://galois.com/blog/2020/09/announcing-the-blst-bls-verification-project/) with [Supranational](https://www.supranational.net/), [Ethereum Foundation](https://ethereum.org/en/) and [Protocol Labs](https://protocol.ai/), NCC provided a [public audit and report](https://research.nccgroup.com/2021/01/20/public-report-blst-cryptographic-implementation-review/), while we at Galois have verified much of the core library.
+At Galois, we've run into [NCC's Cryptography Group] numerous times, because Galois' services and NCC's complement each other extremely well. For example in the ['blst' cryptographic library](https://medium.com/supranational/introducing-blst-2b6a988d68ee) project from [Supranational](https://www.supranational.net/), [Ethereum Foundation](https://ethereum.org/en/) and [Protocol Labs](https://protocol.ai/), NCC provided a [public audit and report](https://research.nccgroup.com/2021/01/20/public-report-blst-cryptographic-implementation-review/), while we at Galois have [verified much of the core library](https://galois.com/blog/2020/09/announcing-the-blst-bls-verification-project/).
 
 When I saw a recent post by [Gérald Doussot](https://research.nccgroup.com/author/geralddoussot/) ([twitter](https://twitter.com/gerald_doussot?lang=en)) titled [Software Verification and Analysis using Z3](https://research.nccgroup.com/2021/01/29/software-verification-and-analysis-using-z3/) I was pretty excited. It turned out to be a great article! The team definitely understands where they can get mileage using 
 SMT solvers such as Z3.
 
-The natural question for me (and others at Galois, like [Aaron Tomb](https://galois.com/team/aaron-tomb/)), is how we would attack the same problem. In the NCC article, they use [SMT-LIB](http://smtlib.cs.uiowa.edu/) directly but add
+An ongoing research area at Galois involves building tools that help engineers interface with SMT solvers, especially in the world of Cryptography. In the NCC article, they use [SMT-LIB](http://smtlib.cs.uiowa.edu/) directly but also say
 
-> Note that Z3 has several, perhaps more approachable APIs available, including in the Python language.
+> Z3 has several, perhaps more approachable APIs available, including in the Python language.
 
-Cryptol is one such interface. And for me, it's what I reach for when I need to do work like what's shared in the NCC post.
+[Cryptol, a tool developed at Galois is one such interface. And for me, it's what I reach for when I need to do work like what's shared in the NCC post.
 
 Cryptol provides, among other things
- - Approachable Syntax
- - Strongly typed length-dependent Sequences
- - First-class functions
+ - Approachable syntax 
+ - Strongly typed length-dependent sequences, allowing static guarantees of program safety
+ - First-class functions, which makes it easy to build abstractions.
 
-From here on, this post was written live as I programmed the first half of the NCC post in Cryptol. If you'd like to see the completed code, you can find it [here](quic.cry). If you'd like to, you can follow along. I've included all of the commands I use to run the program. You'll need to [get Cryptol](https://cryptol.net/downloads.html) first. 
+From here on, this post was written live as I programmed the first half of Gérald's post in Cryptol. If you'd like to see the completed code, you can find it [here](quic.cry). If you'd like to, you can follow along. I've included all of the commands I use to run the program. You'll need to [get Cryptol](https://cryptol.net/downloads.html) first. 
 
 ## Reproducing the Demo 
 
-It starts with a demo. Find values for ```x``` and ```y``` such that ```x + y = 5```
+Gérald's post starts with a demo. Find values for ```x``` and ```y``` such that ```x + y = 5```
 
-Let's create a file. It says we're doing QUIC, so I'll do ```quic.cry```. In cryptol
-solvers reason about functions into bits, so we'll make one of those that takes two variables and tells us if adding them together gives 5. Save that one line into the file
+Let's create a file  ```quic.cry```. In cryptol
+solvers reason about functions into the ```Bit``` types (a single bit of data, like a boolean), so we'll make one of those that takes two variables and tells us if adding them together gives 5.
 
 ```
 sum_eq_5 x y = x + y == 5
 ```
-
-Now in the terminal:
+Save that one line into the file, then in the terminal:
 
 ```
-cryptol quic.cry
+$ cryptol quic.cry
 ```
 
 That loads the file and typechecks it, now we need to tell it what we want the solver to do. In the repl type
@@ -49,7 +48,7 @@ Satisfiable
 sum_eq_5 5 0 = True
 ```
 
-To show off, we can also curry values in Cryptol, so if I want to fix the value of x I can do that:
+To show off, we can also [curry](https://en.wikipedia.org/wiki/Currying) values in Cryptol, so if I want to fix the value of x I can do that:
 
 ```
 Main> :sat sum_eq_5 3
@@ -57,7 +56,7 @@ Satisfiable
 sum_eq_5 3 2 = True
 ```
 
-I'm not going to do this again, but here's the formulation used in smtlib:
+Let's take a look at the formulation used by NCC group in SMT-LIB:
 
 ```
 ; this is a comment - it is ignored by solvers
@@ -91,7 +90,7 @@ sat
 ```
 
 That's remarkable similar to what's going on under the hood in Cryptol! We can actually
-see what cryptol is doing if we set the prover to "offline" which is a smtlib file
+see what Cryptol is doing if we set the prover to "offline" which outputs an SMT-LIB file 
 
 ```
 Main> :set prover=offline
@@ -106,17 +105,17 @@ Main> :sat sum_eq_5 6
 (check-sat)
 ```
 
-If you compare the handwritten to the Cryptol, you'll notice that Cryptol uses a lot more definitions. This is becasue Cryptol agressively breaks down expressions and shares them where possible. For many applications this can make representations far more efficient!
+If you compare the handwritten SMT-LIB to the Cryptol, you'll notice that Cryptol uses a lot more definitions. This is because Cryptol agressively breaks down expressions and shares them where possible. For many applications this makes representations far more efficient!
 
 ## Checking the QUIC DecodePacketNumber Function
 
-In this section, we're going to implement the DecodePacketNumber function. Then
+In this section, we're going to implement the ```DecodePacketNumber``` function. Then
 we'll constrain the inputs and outputs as required by the specification, and
 see if the algoritm suggested by the specification meets those constraints.
 
-I'm going to skip all of the context around what the function does, [the NCC article](https://research.nccgroup.com/2021/01/29/software-verification-and-analysis-using-z3/) does a great job of explaining that part. I'm just going to reproduce the SMT work. 
+I'm going to skip all of the explanation of what the function does. [The NCC article](https://research.nccgroup.com/2021/01/29/software-verification-and-analysis-using-z3/) does a great job of explaining that part. I'm just going to reproduce the SMT work. 
 
-Here's the code snippet that was analyzed. I'll port this to Cryptol. I think it'll be easier to use this version than the SMTLib version from the article, because I haven't used SMTLib very much. 
+Here's the code snippet that was analyzed. I'll port this to Cryptol. I think it'll be easier to use this version than the SMT-LIB version from the article, because I haven't used SMT-LIB very much. 
 
 ```
 DecodePacketNumber(largest_pn, truncated_pn, pn_nbits):
@@ -155,9 +154,9 @@ Let's set up the function type. The article used 64 bit bitvectors, which seems 
 DecodePacketNumber : [64] -> [64] -> [64] -> [64]
 ```
 
-3 64 bit sequences in, and 1 out. Perfect.
+3 64 bit sequences in, and 1 out. Perfect. Cryptol's type system enforces that ```DecodePacketNumber``` must only take sequences that are 64 bits long. Otherwise the type system will complain. 
 
-Cryptol uses ```where``` which is a little upside-down. Here we're saying that there's
+Cryptol uses ```where``` which might seem a little upside-down. Here we're saying that there's
 some value called result, that we define after the ```where``` keyword.
 
 ```
@@ -166,7 +165,7 @@ DecodePacketNumber largest_pn truncated_pn pn_nbits = result where
    result = 0
 ```
 
-Sometimes it's nice to set results to ```0``` or ```undefined``` to see if they type-check. If you already loaded the file in the repl it's easy to reload:
+Sometimes it's nice to set results to ```0``` or ```undefined``` to see if they type-check. If you already loaded the file in the repl it's easy to reload once it's been changed on disk:
 
 ```
 Main> :r
@@ -174,10 +173,10 @@ Loading module Cryptol
 Loading module Main
 ```
 
-It typechecked! Let's fill in the rest of the functionality. Most of it is copy-paste.
-We mess with the names a little, since it's not as nice to update variables in cryptol.
+It typechecked! Let's fill in the rest of the functionality. Most of it is copy-paste from the reference.
+We mess with the names a little, since Cryptol is functional and it can be confusing to rebind names.
 
-When I was copy-pasting, I forgot that ```|``` wasn't in cryptol. The post says it's bitwise or. I think it's ```||```. Let's check:
+When I was copy-pasting, I forgot that ```|``` wasn't in Cryptol. The post says it's bitwise or. I think it's ```||```. Let's check:
 
 ```
 Cryptol> :? ||
@@ -191,7 +190,7 @@ Logical 'or' over bits. Extends element-wise over sequences, tuples.
 
 that's what we want. Same for "and".
 
-Here's a version that typechecks, I'm not sure if it's right yet:
+Here's a version of the function that typechecks, I'm not sure if it's right yet:
 
 ```
 DecodePacketNumber : [64] -> [64] -> [64] -> [64]
@@ -210,10 +209,11 @@ DecodePacketNumber largest_pn truncated_pn pn_nbits = result where
 
 The article does some division, but uses a shift with an offset. I think Cryptol division should work fine here (it might be implemented that way internally, I don't know).
 
-Our ```if``` statements look a little different than the ifs in the reference. That's because Cryptol is a functional lanugage, and there is no concept of a statement. If
-you're familiar with C, a Cryptol if expression is much more like a conditional operator.
+Our ```if``` statements look a little different than the ifs in the reference. That's because Cryptol is a functional lanugage, and there is no concept of a statement. In C, you might
+be used to updating values and calling functions in a sequence, each separated by a semicolon. The right hand side of those sequences are expressions. Functional languages, such as Cryptol, consist almost entirely of expressions, and have no statements at all.
+So, for example, a Cryptol if expression is much more like a conditional operator than an if statement in C.
 
-Whew, they've got a test case (really underwhelming for a function with this much branching behavior). Let's try it out. We'll program the test
+The reference has a single test case (probably not enough for a function with this much branching behavior). Let's try it out. We'll program the test
 vector in Cryptol:
 
 ```
@@ -227,22 +227,22 @@ the result. I'm sure we won't need that though.
 Main> DecodePacketNumber_test1_correct
 False
 ```
-Noooooooo. Time to bug hunt, we'll run the program and see what we get.
+Noooooooo. Time to bug hunt. We'll run the program and see what we get.
 
 ```
 Main> DecodePacketNumber_test1
 0x00000000a82f9b32
 ```
 
-uhh weird. That looks like the result we expected but multiplied by 16 + 2... or a copy paste error. Whoops, our implementation is fine after all, as is the one in the article. Just the article's quote of the spec was off. We'll add that 2 on the back of
+Uhh weird. That looks like the result we expected but multiplied by 16 + 2... or a copy paste error. Whoops, our implementation is fine after all, as is the one in the article. Just the article's quote of the spec was off (The original post has been fixed since). We'll add that 2 on the back of
 our test checker and everything's happy!
 
-In the article, z3 spits out all of the intermediate values. We don't do that in
+In the article, Z3 spits out all of the intermediate values. We don't do that in
 Cryptol because it would usually be pretty hard to filter out what's useful. Could
 be a cool future opportunity for debugging though!
 
 Let's encode some of the conditions around the function now. For example
-truncated-pn has a max of 2**32-1
+```truncated-pn``` has a max of ```2**32-1```:
 
 ```
 truncated_pn_max tpn = tpn <= 2^^32-1
@@ -271,7 +271,7 @@ decode_packet_number_correct fn largest_pn truncated_pn pn_nbits =
      result_max (fn largest_pn truncated_pn pn_nbits)
 ```
 
-It's worth noting that Cryptol has first-class functions. You can see that we actually
+It's worth noting that Cryptol has first-class functions, just like Haskell, Python, and JavaScript. That means that a function or property can take another function as an argument.You can see that we actually
 parameterize this property over functions with the same signature as ```DecodePacketNumber```. This will be useful when we fix the function in a minute!
 
 Let's try to prove that the function meets the specification:
@@ -282,7 +282,7 @@ Counterexample
 decode_packet_number_correct DecodePacketNumber
   0x3ffffffffeb2f6ad 0x000000007d2941d6 0x0000000000000020 = False
 ```
-We got a counterexample. Not the one that the specification calls trivial. I won't go through the exercise of eliminating cases one at a time, but we can do them in the same way by restricting the inputs or outputs in the spec.
+We got a counterexample. Not the one that the NCC article calls out as less interesting. I won't go through the exercise of eliminating cases one at a time, but we can do them in the same way as the article by restricting the inputs or outputs in the spec.
 
 We can also try fixing the function. In the full file that's called ```DecodePacketNumberFixed```. Checking that we get
 
@@ -293,9 +293,10 @@ decode_packet_number_correct DecodePacketNumberFixed
   0x3fffffffffffffff 0x0000000000000015 0x0000000000000008 = False
 ```
 
-Huh. That's the "obvious" failure case, but it doesn't seem to be gone. Either I implemented something incorrectly, or they left that case in when they checked the new implementation. I can't claim to understand the function well enough to know if this is actually a bug.
+Huh. It seems like this failure case might be a mistake of the precondition being
+too permissive with the range on the first argument. I can't claim to understand the function well enough to know if this is actually a bug.
 
-If we eliminate that one case though we get:
+If we update the precondition we get:
 
 ```
 Main> :prove decode_packet_number_correct DecodePacketNumberFixed 
