@@ -1,0 +1,48 @@
+
+type BN = [4][64]
+
+//A spec for what a BN "means as a single sequence"
+bn_to_sequence : BN -> [4*64]
+bn_to_sequence bn =  join (reverse (bn))
+
+sequence_to_bn : [4*64] -> BN
+sequence_to_bn seq = reverse (split (seq))
+
+property bn_roundtrip bn = bn == bn_to_sequence (sequence_to_bn bn)
+
+bits_add : {n} (fin n)=> [n] -> [n] -> Bit -> (Bit,[n])
+bits_add x y cin = (z@0, drop z)
+  where
+  z : [n+1]
+  z = zext x + zext y + zext [cin]
+
+
+bn_add : BN -> BN -> ([4]Bit, BN)
+bn_add a b = (drop cc, d.1)
+  where
+   cc : [5]Bit
+   cc  = [0] # d.0
+
+   d : [4](Bit, [64])
+   d@i = bits_add (a@i) (b@i) (cc@i)
+
+ccs_eq c x y = (bn_add x y).0 == c
+property bn_add_correct x y = sequence_to_bn (bn_to_sequence x + bn_to_sequence y)  == (bn_add x y).1
+
+mqc = 18651
+pc = (2 ^^ 255) - mqc
+
+gf_add : [64] -> BN -> BN -> (BN, [8]Bit)
+gf_add mq a b = (ds3, ccs1 # ccs2) where
+  (ccs1, ds1) = bn_add a b
+  (ccs2, ds2) = bn_add ds1 (update zero 0 (((mq : [64]) << 1) && -(zext [(ccs1!0)])))
+  ds3 = update ds2 0 (ds2@0 + (((mq : [64]) << 1) && -(zext [(ccs2!0)])))
+
+
+carry_eq p c x y r = p c /\ ((gf_add mqc x y).1 == c) /\ ((gf_add mqc x y).0 == r)
+
+gf_add_bv x y = bn_to_sequence ((gf_add mqc (sequence_to_bn x) (sequence_to_bn y))).0
+
+property gf_add_correct x y = (((zext x) : [257]) + (zext y)) % pc == (zext (gf_add_bv x y)) % pc
+
+property mq_mask_correct cc mq = ((mq : [64]) << 1) && -(zext [cc]) == if cc then 2 * mq else 0
